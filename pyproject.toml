@@ -1,0 +1,21 @@
+[project]
+name = "eblog2doc"
+version = "0.1.0"
+description = "Convert engineering blogs to printable PDF documents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "click>=8.1",
+    "rich>=13.0",
+    "weasyprint>=60.0",
+    "html5lib>=1.1",
+]
+
+[project.scripts]
+eblog2doc = "eblog2doc.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
