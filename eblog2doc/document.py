@@ -124,6 +124,106 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def convert_latex_math(text: str) -> str:
+    r"""
+    Convert LaTeX math notation to readable text with HTML superscripts/subscripts.
+    
+    Handles common LaTeX patterns like:
+    - \(1 \times 10^{-9}\) -> 1 × 10<sup>-9</sup>
+    - \(3 \times 10^{-11}\) -> 3 × 10<sup>-11</sup>
+    - \(n^2\) -> n<sup>2</sup>
+    - \(x_1\) -> x<sub>1</sub>
+    """
+    if not text:
+        return text
+    
+    def convert_latex_expression(match):
+        """Convert a single LaTeX expression to HTML."""
+        latex = match.group(1)
+        
+        # Replace common LaTeX commands with Unicode/HTML equivalents
+        # Note: in raw strings, \ matches a literal backslash in the input
+        replacements = [
+            (r'\\times', '×'),
+            (r'\\cdot', '·'),
+            (r'\\div', '÷'),
+            (r'\\pm', '±'),
+            (r'\\mp', '∓'),
+            (r'\\leq', '≤'),
+            (r'\\geq', '≥'),
+            (r'\\neq', '≠'),
+            (r'\\approx', '≈'),
+            (r'\\infty', '∞'),
+            (r'\\alpha', 'α'),
+            (r'\\beta', 'β'),
+            (r'\\gamma', 'γ'),
+            (r'\\delta', 'δ'),
+            (r'\\epsilon', 'ε'),
+            (r'\\theta', 'θ'),
+            (r'\\lambda', 'λ'),
+            (r'\\mu', 'μ'),
+            (r'\\pi', 'π'),
+            (r'\\sigma', 'σ'),
+            (r'\\omega', 'ω'),
+            (r'\\sum', 'Σ'),
+            (r'\\prod', 'Π'),
+            (r'\\sqrt', '√'),
+            (r'\\log', 'log'),
+            (r'\\ln', 'ln'),
+            (r'\\sin', 'sin'),
+            (r'\\cos', 'cos'),
+            (r'\\tan', 'tan'),
+            (r'\\exp', 'exp'),
+            (r'\\,', ' '),  # thin space
+            (r'\\ ', ' '),  # explicit space
+            (r'\\!', ''),   # negative thin space
+        ]
+        
+        result = latex
+        for pattern, replacement in replacements:
+            result = re.sub(pattern, replacement, result)
+        
+        # Handle superscripts: ^{...} or ^x (single char)
+        def replace_superscript(m):
+            content = m.group(1) if m.group(1) else m.group(2)
+            return f'<sup>{content}</sup>'
+        
+        result = re.sub(r'\^{([^}]+)}|\^([^\s{}\\])', replace_superscript, result)
+        
+        # Handle subscripts: _{...} or _x (single char)
+        def replace_subscript(m):
+            content = m.group(1) if m.group(1) else m.group(2)
+            return f'<sub>{content}</sub>'
+        
+        result = re.sub(r'_{([^}]+)}|_([^\s{}\\])', replace_subscript, result)
+        
+        # Clean up remaining backslashes and braces
+        result = re.sub(r'\\[a-zA-Z]+', '', result)  # Remove unknown commands
+        result = result.replace('{', '').replace('}', '')
+        result = result.strip()
+        
+        return result
+    
+    # Match inline math: \(...\)
+    text = re.sub(r'\\\((.+?)\\\)', convert_latex_expression, text, flags=re.DOTALL)
+    
+    # Match display math: \[...\]
+    text = re.sub(r'\\\[(.+?)\\\]', convert_latex_expression, text, flags=re.DOTALL)
+    
+    # Also handle $...$ inline math (common alternative)
+    # Be careful not to match currency like "$10"
+    def convert_dollar_math(match):
+        latex = match.group(1)
+        # Skip if it looks like currency (just a number)
+        if re.match(r'^\d+(\.\d+)?$', latex.strip()):
+            return match.group(0)
+        return convert_latex_expression(match)
+    
+    text = re.sub(r'(?<![\\$])\$([^$]+)\$(?!\d)', convert_dollar_math, text)
+    
+    return text
+
+
 def clean_html_content(html_content: str) -> str:
     """
     Clean HTML content by removing unwanted sections like:
@@ -648,6 +748,7 @@ def build_html_document(posts: list[BlogPost], blog_title: str) -> str:
         
         # Clean and normalize content - remove unwanted sections and fix encoding
         content = clean_html_content(post.content_html)
+        content = convert_latex_math(content)  # Convert LaTeX math to HTML
         content = normalize_text(content)
         
         post_sections.append(f'''
