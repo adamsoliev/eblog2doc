@@ -224,6 +224,49 @@ def convert_latex_math(text: str) -> str:
     return text
 
 
+def resolve_relative_urls(html_content: str, base_url: str) -> str:
+    """
+    Resolve relative URLs in HTML content to absolute URLs.
+    
+    Converts links like '/on-slop' to 'https://example.com/on-slop'
+    based on the provided base URL.
+    """
+    from urllib.parse import urljoin, urlparse
+    from bs4 import BeautifulSoup
+    
+    if not base_url:
+        return html_content
+    
+    soup = BeautifulSoup(html_content, "html5lib")
+    
+    # Get the base domain for resolving URLs
+    parsed_base = urlparse(base_url)
+    base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
+    
+    # Resolve href attributes in <a> tags
+    for a in soup.find_all('a', href=True):
+        href = a.get('href', '')
+        if href and not href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+            # Skip anchor-only links and special protocols
+            if href.startswith('/'):
+                # Absolute path - resolve against domain
+                a['href'] = urljoin(base_domain, href)
+            elif not href.startswith(('http://', 'https://')):
+                # Relative path - resolve against full base URL
+                a['href'] = urljoin(base_url, href)
+    
+    # Resolve src attributes in <img> tags
+    for img in soup.find_all('img', src=True):
+        src = img.get('src', '')
+        if src:
+            if src.startswith('/'):
+                img['src'] = urljoin(base_domain, src)
+            elif not src.startswith(('http://', 'https://', 'data:')):
+                img['src'] = urljoin(base_url, src)
+    
+    return str(soup)
+
+
 def clean_html_content(html_content: str) -> str:
     """
     Clean HTML content by removing unwanted sections like:
@@ -390,6 +433,98 @@ def clean_html_content(html_content: str) -> str:
             first_h1.decompose()
         except Exception:
             pass
+    
+    # Clean up footnotes: move ↩ backref links inline with footnote text
+    # Pattern 1: <li id="fn-X"><p>text</p><a class="footnote-backref">↩</a></li>
+    # Should become: <li id="fn-X"><p>text <a class="footnote-backref">↩</a></p></li>
+    for li in soup.find_all('li', id=lambda x: x and x.startswith('fn')):
+        backref = li.find('a', class_=lambda c: c and 'backref' in str(c).lower())
+        if not backref:
+            # Also try finding by href pattern
+            backref = li.find('a', href=lambda h: h and '#fnref' in str(h))
+        if not backref:
+            # Try finding by ↩ character
+            backref = li.find('a', string=lambda s: s and '↩' in str(s))
+        
+        if backref:
+            # Find the last paragraph in this footnote
+            paragraphs = li.find_all('p')
+            if paragraphs:
+                last_p = paragraphs[-1]
+                # Move backref inside the paragraph
+                backref.extract()
+                last_p.append(' ')
+                last_p.append(backref)
+    
+    # Also clean up footnote sections that have excessive whitespace
+    # by ensuring footnote list items are compact
+    for footnote_div in soup.find_all(class_=lambda c: c and 'footnote' in str(c).lower()):
+        # Remove any empty paragraphs or excess whitespace elements
+        for p in footnote_div.find_all('p'):
+            if not p.get_text(strip=True):
+                try:
+                    p.decompose()
+                except Exception:
+                    pass
+    
+    # Remove paragraphs that contain only subscribe/action-related content
+    action_patterns = [
+        'if you liked this',
+        'consider subscribing',
+        'subscribe to',
+        'email updates',
+        'sharing it on',
+        'share this post',
+        'follow me on',
+        'here\'s a preview',
+        'related post',
+        'continue reading',
+    ]
+    
+    for element in soup.find_all(['p', 'div', 'section']):
+        if element.parent is None:
+            continue
+        text = element.get_text(strip=True).lower()
+        for pattern in action_patterns:
+            if pattern in text and len(text) < 300:  # Only short paragraphs
+                try:
+                    element.decompose()
+                except Exception:
+                    pass
+                break
+    
+    # Remove blockquotes that appear to be related post previews
+    # These typically have inline styles and appear at the end of content
+    for blockquote in soup.find_all('blockquote'):
+        # Check if it looks like a related post preview
+        style = blockquote.get('style', '')
+        text = blockquote.get_text(strip=True).lower()
+        
+        # Remove if it has inline styling (common for related post cards)
+        # or if it contains text patterns indicating it's a preview
+        is_styled_card = 'border-left' in style and 'padding' in style
+        has_preview_patterns = any(p in text for p in [
+            'continue reading', 'read more', 'related:', 'see also:',
+        ])
+        
+        # Also remove blockquotes that start with an h1-h6 style title
+        # (these are typically post preview cards)
+        first_p = blockquote.find('p')
+        if first_p:
+            first_p_style = first_p.get('style', '')
+            is_title_style = 'font-weight' in first_p_style and ('600' in first_p_style or 'bold' in first_p_style.lower())
+            if is_styled_card and is_title_style:
+                try:
+                    blockquote.decompose()
+                except Exception:
+                    pass
+                continue
+        
+        if has_preview_patterns:
+            try:
+                blockquote.decompose()
+            except Exception:
+                pass
     
     return str(soup)
 
@@ -585,6 +720,35 @@ hr {
     margin: 2em 0;
 }
 
+/* Footnotes section - compact styling */
+.footnotes {
+    font-size: 9pt;
+    margin-top: 2em;
+}
+
+.footnotes hr {
+    margin: 1em 0;
+}
+
+.footnotes ol {
+    margin-bottom: 0;
+    padding-left: 1.5em;
+}
+
+.footnotes li {
+    margin-bottom: 0.5em;
+}
+
+.footnotes li p {
+    margin-bottom: 0;
+    display: inline;
+}
+
+.footnotes .footnote-backref {
+    margin-left: 0.3em;
+    text-decoration: none;
+}
+
 /* Cover page */
 .cover {
     text-align: center;
@@ -748,6 +912,7 @@ def build_html_document(posts: list[BlogPost], blog_title: str) -> str:
         
         # Clean and normalize content - remove unwanted sections and fix encoding
         content = clean_html_content(post.content_html)
+        content = resolve_relative_urls(content, post.url)  # Resolve relative URLs
         content = convert_latex_math(content)  # Convert LaTeX math to HTML
         content = normalize_text(content)
         
