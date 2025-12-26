@@ -1,5 +1,6 @@
 """Generic fallback parser for unknown blogs."""
 
+import json
 import re
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -41,7 +42,14 @@ class GenericParser(BaseParser):
         soup = BeautifulSoup(html, "html5lib")
         posts = []
         base_domain = urlparse(base_url).netloc
-        base_path = urlparse(base_url).path.rstrip("/")
+        original_path = urlparse(base_url).path.rstrip("/")
+        
+        # Handle Substack-style URLs: /p/posts-table-of-contents -> /p/
+        # This allows discovery of sibling posts under /p/
+        if "/p/" in original_path:
+            base_path = "/p"
+        else:
+            base_path = original_path
         
         # Find all links
         for link in soup.find_all("a", href=True):
@@ -222,7 +230,10 @@ class GenericParser(BaseParser):
         soup = BeautifulSoup(html, "html5lib")
         
         # Try common article containers in order of preference
+        # Substack uses div.body.markup for post content
         selectors = [
+            ("div", {"class": re.compile(r"body.*markup", re.I)}),  # Substack
+            ("div", {"class": "available-content"}),  # Substack fallback
             ("article", {}),
             ("main", {}),
             ("div", {"class": re.compile(r"post-content|article-content|entry-content", re.I)}),
@@ -246,3 +257,56 @@ class GenericParser(BaseParser):
             return str(body)
         
         return html
+    
+    def extract_date_from_post(self, html: str) -> datetime | None:
+        """
+        Extract publication date from a post page.
+        
+        Tries multiple sources in order of reliability:
+        1. JSON-LD structured data (most reliable for Substack)
+        2. Meta tags (article:published_time)
+        3. Visible date text in header area
+        """
+        soup = BeautifulSoup(html, "html5lib")
+        
+        # 1. Try JSON-LD (Substack uses this)
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or "")
+                # Handle both single objects and arrays
+                if isinstance(data, list):
+                    data = data[0] if data else {}
+                
+                date_str = data.get("datePublished") or data.get("dateModified")
+                if date_str:
+                    # Parse ISO format: 2024-12-16T15:45:55-06:00
+                    # Remove timezone for simpler parsing
+                    date_str = date_str.split("T")[0]
+                    return datetime.strptime(date_str, "%Y-%m-%d")
+            except (json.JSONDecodeError, ValueError, KeyError):
+                continue
+        
+        # 2. Try meta tags
+        meta_selectors = [
+            ("meta", {"property": "article:published_time"}),
+            ("meta", {"name": "article:published_time"}),
+            ("meta", {"property": "og:article:published_time"}),
+        ]
+        for tag, attrs in meta_selectors:
+            meta = soup.find(tag, attrs)
+            if meta and meta.get("content"):
+                try:
+                    date_str = meta["content"].split("T")[0]
+                    return datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+        
+        # 3. Try visible date in post header (look for date patterns)
+        header = soup.find("header") or soup.find(class_=re.compile(r"post-header|article-header", re.I))
+        if header:
+            text = header.get_text(separator=" ")
+            date = self._extract_date(text)
+            if date:
+                return date
+        
+        return None

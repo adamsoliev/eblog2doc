@@ -74,15 +74,15 @@ def normalize_text(text: str) -> str:
         'â€˜': "'",      # Left single quote
         'â€œ': '"',      # Left double quote
         'â€': '"',       # Right double quote (partial)
-        'â€"': '-',      # Em dash
-        'â€"': '-',      # En dash
+        'â€"': ' – ',      # Em dash
+        'â€"': ' – ',      # En dash
         'â€¦': '...',    # Ellipsis
         'Ã¢': 'a',       # â misencoded
         'â\x80\x99': "'",  # Another form
         'â\x80\x9c': '"',
         'â\x80\x9d': '"',
-        'â\x80\x93': '-',
-        'â\x80\x94': '-',
+        'â\x80\x93': ' – ',
+        'â\x80\x94': ' – ',
         # Common patterns with replacement chars
         'â□□': "'",      # Visible replacement
         'â\ufffd\ufffd': "'",
@@ -107,8 +107,8 @@ def normalize_text(text: str) -> str:
         '\u2019': "'",   # Right single quote
         '\u201c': '"',   # Left double quote
         '\u201d': '"',   # Right double quote
-        '\u2013': '-',   # En dash
-        '\u2014': '-',   # Em dash
+        '\u2013': ' – ',   # En dash -> en-dash with spaces for readability
+        '\u2014': ' – ',   # Em dash -> en-dash with spaces for readability
         '\u2026': '...',  # Ellipsis
         '\u00a0': ' ',   # Non-breaking space
         '\u200b': '',    # Zero-width space

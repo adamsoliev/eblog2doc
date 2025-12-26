@@ -219,7 +219,7 @@ def fetch_post_content(post: BlogPost, parser: BaseParser) -> None:
     """
     Fetch and parse content for a single blog post.
     
-    Modifies the post in-place, setting content_html.
+    Modifies the post in-place, setting content_html and optionally date.
     
     Args:
         post: BlogPost to fetch content for
@@ -230,3 +230,7 @@ def fetch_post_content(post: BlogPost, parser: BaseParser) -> None:
     """
     html = fetch_url(post.url)
     post.content_html = parser.parse_post(html, post.url)
+    
+    # Try to extract date from post page if not already set
+    if post.date is None and hasattr(parser, 'extract_date_from_post'):
+        post.date = parser.extract_date_from_post(html)
